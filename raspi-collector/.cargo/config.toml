@@ -1,0 +1,20 @@
+# Cross-compile to Raspberry Pi 4 (64-bit ARM, aarch64)
+#
+# Prerequisites (macOS):
+#   brew tap messense/macos-cross-toolchains
+#   brew install aarch64-unknown-linux-gnu
+#
+# Prerequisites (Linux/Debian):
+#   sudo apt install gcc-aarch64-linux-gnu
+#
+# Add the Rust target once:
+#   rustup target add aarch64-unknown-linux-gnu
+#
+# Build release binary for Pi:
+#   cargo build --target aarch64-unknown-linux-gnu --release
+#
+# Copy to Pi:
+#   scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi@<PI_IP>:~/
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
