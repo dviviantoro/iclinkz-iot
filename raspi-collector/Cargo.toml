@@ -9,6 +9,9 @@ log        = "0.4"
 env_logger = "0.11"
 serde_json = "1"
 i2cdev     = "0.5"
+rumqttc    = "0.24"
+dotenvy    = "0.15"
+clap       = { version = "4", features = ["derive"] }
 
 [profile.release]
 opt-level     = "z"

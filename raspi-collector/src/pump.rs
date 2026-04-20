@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 
 /// One pump's reading from the JSON payload.
+/// JSON keys: err, v, i, f, pf, p, e
 #[derive(Debug, Clone, Default)]
 pub struct PumpEntry {
-    pub err:   u32,
-    pub volts: f64,
-    pub watts: f64,
+    pub err:          u32,
+    pub volts:        f64,  // v  — voltage (V)
+    pub current:      f64,  // i  — current (A)
+    pub frequency:    f64,  // f  — frequency (Hz)
+    pub power_factor: f64,  // pf — power factor (0–1)
+    pub power:        f64,  // p  — active power (W)
+    pub energy:       f64,  // e  — energy (kWh)
 }
 
 /// Full payload returned by the USB JSON node.
@@ -19,7 +24,7 @@ pub struct PumpData {
 
 impl PumpData {
     /// Parse from a raw JSON string.  Expected shape:
-    /// `{"ts":"…", "pump1":{"err":0,"v":220.5,"w":150.3}, …}`
+    /// `{"ts":"…","pump1":{"err":0,"v":220.5,"i":5.2,"f":50.0,"pf":0.95,"p":150.3,"e":0.5},…}`
     pub fn from_json(json_str: &str, source: String) -> Result<Self, String> {
         let value: serde_json::Value =
             serde_json::from_str(json_str).map_err(|e| format!("JSON parse: {e}"))?;
@@ -39,10 +44,16 @@ impl PumpData {
             if key == "ts" {
                 continue;
             }
-            let err   = val.get("err").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let volts = val.get("v")  .and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let watts = val.get("w")  .and_then(|v| v.as_f64()).unwrap_or(0.0);
-            pumps.insert(key.clone(), PumpEntry { err, volts, watts });
+            let err          = val.get("err").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let volts        = val.get("v") .and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let current      = val.get("i") .and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let frequency    = val.get("f") .and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let power_factor = val.get("pf").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let power        = val.get("p") .and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let energy       = val.get("e") .and_then(|v| v.as_f64()).unwrap_or(0.0);
+            pumps.insert(key.clone(), PumpEntry {
+                err, volts, current, frequency, power_factor, power, energy,
+            });
         }
 
         Ok(PumpData { source, timestamp, pumps })
