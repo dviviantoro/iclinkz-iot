@@ -8,6 +8,7 @@ serialport = { version = "4.3", default-features = false }
 log        = "0.4"
 env_logger = "0.11"
 serde_json = "1"
+i2cdev     = "0.5"
 
 [profile.release]
 opt-level     = "z"

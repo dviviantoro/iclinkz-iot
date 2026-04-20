@@ -13,6 +13,14 @@ pub const TIMEOUT_MS:         u64 = 2000;  // overall response deadline
 pub const SERIAL_TIMEOUT_MS:  u64 = 100;   // per read() syscall (non-blocking feel)
 pub const RETRY_DELAY_MS:     u64 = 500;
 
+// ── AHT10 ambient sensor (I2C, Linux only) ────────────────────────────────────
+pub const I2C_BUS:    &str = "/dev/i2c-1";
+pub const AHT10_ADDR: u16  = 0x38;
+#[cfg(target_os = "linux")]
+pub const AHT10_INIT_DELAY_MS: u64 = 20;   // datasheet: ≥10 ms after init cmd
+#[cfg(target_os = "linux")]
+pub const AHT10_MEAS_DELAY_MS: u64 = 80;   // datasheet: ≥75 ms after trigger
+
 // ── Modbus ────────────────────────────────────────────────────────────────────
 pub const MAX_RETRIES:    u32  = 3;
 pub const NUM_REGISTERS:  usize = 10;

@@ -71,15 +71,107 @@ When a PZEM sensor fails, only the `err` field is present (no `v`, `i`, etc.). T
 
 **Build & deploy:**
 
+> **Cross-compile from a development machine (recommended)** — compiling directly on the Raspberry Pi is slow. Build on your PC/Mac and copy the binary over.
+
+**Step 1 — Install the cross-compilation target**
+
+| Raspberry Pi OS | Target triple |
+|-----------------|---------------|
+| 64-bit (RPi 3 / 4 / 5, recommended) | `aarch64-unknown-linux-gnu` |
+| 32-bit (legacy Raspberry Pi OS) | `armv7-unknown-linux-gnueabihf` |
+
+```bash
+# Pick the triple that matches your RPi OS
+rustup target add aarch64-unknown-linux-gnu
+# or
+rustup target add armv7-unknown-linux-gnueabihf
+```
+
+**Step 2 — Install a cross-linker**
+
+The easiest approach is the [`cross`](https://github.com/cross-rs/cross) tool — it uses Docker under the hood, so no manual linker setup is needed.
+
+```bash
+cargo install cross --git https://github.com/cross-rs/cross
+```
+
+Alternatively, install the bare-metal linker directly:
+
+```bash
+# macOS (Homebrew)
+brew install arm-linux-gnueabihf-binutils   # 32-bit
+brew install aarch64-unknown-linux-gnu      # 64-bit (via tap or cargo-zigbuild)
+
+# Ubuntu / Debian
+sudo apt install gcc-aarch64-linux-gnu      # 64-bit
+sudo apt install gcc-arm-linux-gnueabihf    # 32-bit
+```
+
+If using the bare linker, add a Cargo config so it is picked up automatically:
+
+```toml
+# raspi-collector/.cargo/config.toml
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+```
+
+**Step 3 — Build**
+
 ```bash
 cd raspi-collector
-cargo build --release
 
-# On the Raspberry Pi
-./target/release/raspi-collector
+# With `cross` (recommended — handles sysroot automatically)
+cross build --release --target aarch64-unknown-linux-gnu
+
+# With the bare linker
+cargo build --release --target aarch64-unknown-linux-gnu
+```
+
+The binary is output to:
+```
+raspi-collector/target/aarch64-unknown-linux-gnu/release/raspi-collector
+```
+
+**Step 4 — Deploy to Raspberry Pi**
+
+```bash
+# Copy binary (replace <RPI_IP> with your Pi's IP address)
+scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi@<RPI_IP>:~/
+
+# SSH in and run
+ssh pi@<RPI_IP>
+./raspi-collector
 
 # Adjust log verbosity
-RUST_LOG=debug ./target/release/raspi-collector
+RUST_LOG=debug ./raspi-collector
+```
+
+**Optional — install as a systemd service on the Raspberry Pi:**
+
+```ini
+# /etc/systemd/system/raspi-collector.service
+[Unit]
+Description=iclinkz IPAL data collector
+After=network.target
+
+[Service]
+ExecStart=/home/pi/raspi-collector
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now raspi-collector
+sudo journalctl -fu raspi-collector
 ```
 
 **Configuration** — edit [`src/config.rs`](raspi-collector/src/config.rs):

@@ -4,11 +4,15 @@ mod sensor;
 mod reader;
 mod pump;
 mod uart_usb;
+#[cfg(target_os = "linux")]
+mod aht10;
 
 use reader::{ModbusReader, SensorReader};
 use sensor::SensorData;
 use uart_usb::UartJsonReader;
 use pump::PumpData;
+#[cfg(target_os = "linux")]
+use aht10::{Aht10Reader, AmbientData};
 use std::thread;
 use std::time::Duration;
 
@@ -21,12 +25,16 @@ fn main() {
 
     log::info!("raspi-collector v{} starting", env!("CARGO_PKG_VERSION"));
     log::info!(
-        "RS485 -> {} @ {} baud  slave {}",
+        "RS485  -> {} @ {} baud  slave {}",
         config::RS485_PORT, config::RS485_BAUD, config::RS485_SLAVE
     );
     log::info!(
-        "USB   -> {} @ {} baud  (JSON protocol)",
+        "USB    -> {} @ {} baud  (JSON protocol)",
         config::USB_PORT, config::USB_BAUD
+    );
+    log::info!(
+        "AHT10  -> {}  addr 0x{:02X}",
+        config::I2C_BUS, config::AHT10_ADDR
     );
     log::info!(
         "poll interval {}s | retries {} | timeout {}ms",
@@ -37,22 +45,38 @@ fn main() {
         "RS485", config::RS485_PORT, config::RS485_BAUD, config::RS485_SLAVE,
     );
     let mut usb = UartJsonReader::new("USB", config::USB_PORT, config::USB_BAUD);
+    #[cfg(target_os = "linux")]
+    let mut aht10 = Aht10Reader::new(config::I2C_BUS, config::AHT10_ADDR);
 
     loop {
-        // ── RS485 Modbus node (water quality sensors) ──────────────────────────
-        match rs485.read() {
-            Ok(data) => log_sensor_data(&data),
-            Err(_)   => {}  // state transitions logged inside ModbusReader
+        // ── AHT10: ambient temperature & humidity (I2C) ────────────────────────
+        #[cfg(target_os = "linux")]
+        match aht10.read() {
+            Ok(data) => log_ambient_data(&data),
+            Err(_)   => {}  // state transitions logged inside Aht10Reader
         }
 
-        // ── USB JSON node (pump monitor) ───────────────────────────────────────
+        // ── RS485 Modbus node: water quality sensors ───────────────────────────
+        match rs485.read() {
+            Ok(data) => log_sensor_data(&data),
+            Err(_)   => {}
+        }
+
+        // ── USB JSON node: pump monitor ────────────────────────────────────────
         match usb.read() {
             Ok(data) => log_pump_data(&data),
-            Err(_)   => {}  // state transitions logged inside UartJsonReader
+            Err(_)   => {}
         }
 
         thread::sleep(Duration::from_secs(config::READ_INTERVAL_SECS));
     }
+}
+
+#[cfg(target_os = "linux")]
+fn log_ambient_data(d: &AmbientData) {
+    log::info!("[AHT10] ─────────────────────────────────────────");
+    log::info!("[AHT10]   Temperature : {:>7.2} °C", d.temperature);
+    log::info!("[AHT10]   Humidity    : {:>7.2} %",  d.humidity);
 }
 
 fn log_sensor_data(d: &SensorData) {
@@ -80,10 +104,8 @@ fn log_pump_data(d: &PumpData) {
     log::info!("[{}] ─────────────────────────────────────────", d.source);
     log::info!("[{}]   Timestamp : {}", d.source, d.timestamp);
 
-    // Sort keys so output order is deterministic
     let mut keys: Vec<&String> = d.pumps.keys().collect();
     keys.sort();
-
     for key in keys {
         let p = &d.pumps[key];
         if p.err > 0 {
