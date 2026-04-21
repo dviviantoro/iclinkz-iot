@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi5
-WorkingDirectory=/home/pi5/iclinkz
-EnvironmentFile=/home/pi5/iclinkz/.env
-ExecStart=/home/pi5/iclinkz/raspi-collector --mode subscriber
+WorkingDirectory=/home/pi5/Documents/iclinkz
+EnvironmentFile=/home/pi5/Documents/iclinkz/.env
+ExecStart=/home/pi5/Documents/iclinkz/raspi-collector --mode mqtt
 Restart=on-failure
 RestartSec=10
 
