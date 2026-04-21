@@ -1,12 +1,14 @@
 # raspi-collector
 
 Rust data-collection daemon for **Raspberry Pi 4 (64-bit)** that reads three IoT nodes and publishes to an MQTT broker.
+Includes a standalone **meter simulator** (`simulate` binary) for testing without hardware.
 
 | Interface | Protocol | Node | Data |
 |---|---|---|---|
 | `/dev/ttyS0` (RS485) | Modbus RTU | STM32 water-quality node | DO, EC, Salinity, TDS, pH + temperatures |
 | `/dev/ttyUSB0` (USB UART) | JSON over serial | Pump monitor node | Per-pump V, A, Hz, PF, W, kWh |
 | `/dev/i2c-1` (I2C) | AHT10 native | Ambient sensor | Temperature, Humidity |
+| `meter-data/` (JSON files) | simulate binary | IPM flow meter | Cumulative volume, nominal flow rate |
 
 ---
 
@@ -69,6 +71,8 @@ cp .env.example .env
 | `MQTT_PASSWORD` | _(blank)_ | Leave empty if no auth |
 | `MQTT_QOS` | `1` | 0 = AtMostOnce · 1 = AtLeastOnce · 2 = ExactlyOnce |
 | `MQTT_KEEP_ALIVE` | `60` | Keep-alive interval (seconds) |
+| `SIMULATE_INTERVAL_MINS` | `30` | How often simulate publishes a reading |
+| `METER_DATA_DIR` | `meter-data` | Directory for meter JSON files |
 
 ---
 
@@ -79,7 +83,9 @@ cp .env.example .env
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo build --release
-./target/release/raspi-collector
+# Both binaries are built:
+./target/release/raspi-collector   # hardware daemon
+./target/release/simulate          # flow meter simulator
 ```
 
 ### Cross-compile from macOS / Linux → RPi 4 (aarch64, 64-bit)
@@ -107,21 +113,22 @@ sudo apt install gcc-aarch64-linux-gnu
 cargo build --target aarch64-unknown-linux-gnu --release
 ```
 
-Binary: `target/aarch64-unknown-linux-gnu/release/raspi-collector`
+Binaries: `target/aarch64-unknown-linux-gnu/release/raspi-collector`
+         `target/aarch64-unknown-linux-gnu/release/simulate`
 
 **4. Deploy:**
 ```bash
-# Copy binary and config to the Pi
 scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi@<PI_IP>:~/collector/
+scp target/aarch64-unknown-linux-gnu/release/simulate       pi@<PI_IP>:~/collector/
 scp .env pi@<PI_IP>:~/collector/
-
-# Run
-ssh pi@<PI_IP> "cd ~/collector && ./raspi-collector"
+scp -r meter-data pi@<PI_IP>:~/collector/
 ```
 
 ---
 
 ## Usage
+
+### raspi-collector (hardware daemon)
 
 ```
 raspi-collector [OPTIONS]
@@ -136,20 +143,47 @@ Options:
   -V, --version              Print version
 ```
 
-### Examples
-
 ```bash
-# Default — publish to MQTT, .env in current directory
+# Default — publish to MQTT
 ./raspi-collector
-
-# .env stored next to the binary (run from anywhere)
-./raspi-collector --env-file /home/pi/collector/.env
 
 # Read-only — log sensor data, no MQTT
 ./raspi-collector --mode read-only
 
 # Subscribe mode — also listen for incoming control commands
 ./raspi-collector --mode subscriber --env-file /etc/raspi-collector.env
+```
+
+### simulate (flow meter simulator)
+
+Reads `meter-data/sample.json` as base data, increments the cumulative reading each interval, writes a new timestamped JSON file, and publishes to MQTT. **No hardware or Groq API required.**
+
+```bash
+# Run from the raspi-collector directory (so .env and meter-data/ are found)
+cargo run --bin simulate
+
+# Or with the compiled binary
+./simulate
+
+# Custom .env path
+./simulate --env-file /path/to/.env
+```
+
+**What it does each tick (default: every 30 minutes):**
+
+1. Loads the most recent JSON in `meter-data/` (falls back to `sample.json` if none)
+2. Increments `reading_m3` by 2 m³
+3. Updates the timestamp to now (UTC)
+4. Writes `meter-data/YYYYMMDD_HHMMSS.json`
+5. Publishes to `{DEVICE_ID}/meters/flowmeter` on MQTT
+
+**Log output:**
+```
+Loaded env: .env
+[simulate] using: meter-data/sample.json
+[simulate] wrote meter-data/20260420_113936.json
+[MQTT>] rpi-001/meters/flowmeter → {"brand":"IPM","reading_m3":"000333","dn_mm":100,"qn_m3h":60,...}
+[simulate] sleeping 30 minutes…
 ```
 
 ### Log level
@@ -160,40 +194,13 @@ RUST_LOG=debug ./raspi-collector   # verbose — every retry attempt
 RUST_LOG=warn  ./raspi-collector   # quiet   — only warnings and errors
 ```
 
-### Sample output
-
-```
-Loaded env: /home/pi/collector/.env
-2026-04-20T08:00:00Z INFO  raspi-collector v0.1.0 | mode: Mqtt
-2026-04-20T08:00:00Z INFO  RS485  -> /dev/ttyS0 @ 9600 baud  slave 10
-2026-04-20T08:00:00Z INFO  USB    -> /dev/ttyUSB0 @ 9600 baud  (JSON)
-2026-04-20T08:00:00Z INFO  AHT10  -> /dev/i2c-1  addr 0x38
-2026-04-20T08:00:00Z INFO  [MQTT] connected as 'rpi-001'
-2026-04-20T08:00:00Z INFO  [AHT10] ──────────────────────────────────────
-2026-04-20T08:00:00Z INFO  [AHT10]   Temperature :   27.43 °C
-2026-04-20T08:00:00Z INFO  [AHT10]   Humidity    :   65.20 %
-2026-04-20T08:00:00Z INFO  [RS485] ──────────────────────────────────────
-2026-04-20T08:00:00Z INFO  [RS485]   Avg Water Temp : 25.3 °C
-2026-04-20T08:00:00Z INFO  [RS485]   [DO]  OK
-2026-04-20T08:00:00Z INFO  [RS485]         Saturation       98.4 %
-2026-04-20T08:00:00Z INFO  [RS485]         Concentration     7.82 mg/L
-2026-04-20T08:00:00Z INFO  [RS485]   [EC]  OK
-2026-04-20T08:00:00Z INFO  [RS485]         EC             1240 µS/cm
-2026-04-20T08:00:00Z INFO  [RS485]   [pH]  OK
-2026-04-20T08:00:00Z INFO  [RS485]         pH               7.2
-2026-04-20T08:00:00Z INFO  [USB] ──────────────────────────────────────
-2026-04-20T08:00:00Z INFO  [USB]   pump1 : ONLINE |  220.50V   5.20A  50.0Hz PF=0.95   150.30W    0.500kWh
-2026-04-20T08:00:01Z ERROR [USB] device OFFLINE — no response after 3 attempts
-2026-04-20T08:00:45Z INFO  [USB] device back ONLINE
-```
-
 ---
 
 ## MQTT topics
 
 All topics are prefixed with `DEVICE_ID` from `.env`.
 
-### Published
+### Published by `raspi-collector`
 
 | Topic | Payload |
 |---|---|
@@ -201,11 +208,27 @@ All topics are prefixed with `DEVICE_ID` from `.env`.
 | `{DEVICE_ID}/sensors/blower_pump` | `{"v1":220.5,"i1":5.2,"f1":50.0,"pf1":0.95,"p1":150.3,"e1":0.5,"v2":…}` |
 | `{DEVICE_ID}/sensors/ambient` | `{"amb_temp":27.43,"amb_hum":65.20}` |
 
+### Published by `simulate`
+
+| Topic | Payload |
+|---|---|
+| `{DEVICE_ID}/meters/flowmeter` | `{"brand":"IPM","reading_m3":"000333","dn_mm":100,"qn_m3h":60,"pn_bar":16,"max_temp_c":50,"iso":4064,"timestamp":"2026-04-20T11:39:36Z"}` |
+
 ### Subscribed (`--mode subscriber`)
 
 | Topic | Purpose |
 |---|---|
 | `{DEVICE_ID}/control/#` | Incoming control commands (logged; extend in `src/mqtt.rs`) |
+
+### iclinkz subscription mapping
+
+iclinkz subscribes to all raspi-collector topics automatically:
+
+| iclinkz subscription | Matches |
+|---|---|
+| `+/sensors/+` | `{device_id}/sensors/chamber_effluent`, `/blower_pump`, `/ambient` |
+| `+/meters/+` | `{device_id}/meters/flowmeter` |
+| `+/status` | `{device_id}/status` |
 
 ---
 
@@ -220,6 +243,8 @@ Each reader tracks its own connection state independently:
 ---
 
 ## Running as a systemd service
+
+### raspi-collector
 
 ```ini
 # /etc/systemd/system/raspi-collector.service
@@ -239,10 +264,31 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 ```
 
+### simulate
+
+```ini
+# /etc/systemd/system/raspi-simulate.service
+[Unit]
+Description=Raspberry Pi Flow Meter Simulator
+After=network.target
+
+[Service]
+ExecStart=/home/pi/collector/simulate --env-file /home/pi/collector/.env
+WorkingDirectory=/home/pi/collector
+Restart=always
+RestartSec=10
+User=pi
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ```bash
-sudo systemctl enable raspi-collector
-sudo systemctl start  raspi-collector
+sudo systemctl enable raspi-collector raspi-simulate
+sudo systemctl start  raspi-collector raspi-simulate
 sudo journalctl -fu   raspi-collector
+sudo journalctl -fu   raspi-simulate
 ```
 
 ---
@@ -252,6 +298,7 @@ sudo journalctl -fu   raspi-collector
 ```
 src/
   main.rs      — CLI parse, env load, logger init, reader + MQTT wiring, poll loop
+  simulate.rs  — Standalone meter simulator (reads sample.json, publishes flowmeter data)
   cli.rs       — clap argument definitions (--mode, --env-file)
   config.rs    — hardware constants (ports, baud rates, timeouts, retry limits)
   modbus.rs    — Modbus RTU protocol: CRC-16, frame builder, response reader, parser
@@ -261,6 +308,15 @@ src/
   uart_usb.rs  — UartJsonReader: send READ\n, parse JSON line, retry, offline state
   aht10.rs     — Aht10Reader: I2C init + trigger + parse, retry, offline state [Linux]
   mqtt.rs      — MqttEnv (from .env), MqttPublisher, payload builders, event-loop thread
+meter-data/
+  sample.json  — Base flow meter reading (IPM brand, used by simulate as seed)
+  *.json       — Generated readings from simulate or OCR scripts (gitignored)
+scripts/
+  run.sh           — Entry point: capture image → OCR → write JSON
+  capture.sh       — Camera capture (libcamera / raspistill / fswebcam / ffmpeg)
+  ocr-meter-groq.sh — Groq Vision API OCR for physical meter images
+  setup-cron.sh    — Cron scheduler setup
+  test.sh          — Simulates 4 cron runs using sample.jpeg (no camera needed)
 .cargo/
   config.toml  — aarch64-unknown-linux-gnu linker for cross-compilation
 .env           — device ID + MQTT credentials (do not commit)
