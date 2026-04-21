@@ -13,8 +13,29 @@
 # Build release binary for Pi:
 #   cargo build --target aarch64-unknown-linux-gnu --release
 #
-# Copy to Pi:
-#   scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi@<PI_IP>:~/
+# ── Deploy to Pi ──────────────────────────────────────────────────────────────
+#
+# 1. Copy binary and .env (first deploy):
+#      ssh pi5@<PI_IP> "mkdir -p /home/pi5/iclinkz"
+#      scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi5@<PI_IP>:/home/pi5/iclinkz/
+#      scp .env pi5@<PI_IP>:/home/pi5/iclinkz/.env
+#
+# 2. Install the systemd service (first deploy only):
+#      scp raspi-collector.service pi5@<PI_IP>:/tmp/
+#      ssh pi5@<PI_IP> "sudo mv /tmp/raspi-collector.service /etc/systemd/system/ && \
+#                       sudo systemctl daemon-reload && \
+#                       sudo systemctl enable raspi-collector && \
+#                       sudo systemctl start raspi-collector"
+#
+# 3. Update binary only (subsequent deploys):
+#      scp target/aarch64-unknown-linux-gnu/release/raspi-collector pi5@<PI_IP>:/home/pi5/iclinkz/
+#      ssh pi5@<PI_IP> "sudo systemctl restart raspi-collector"
+#
+# 4. View live logs on Pi:
+#      journalctl -u raspi-collector -f
+#
+# 5. Pi system dependency (for USB webcam flowmeter capture):
+#      sudo apt install fswebcam
 
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"

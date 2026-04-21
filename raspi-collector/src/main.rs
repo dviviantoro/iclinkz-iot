@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod flowmeter;
 mod modbus;
 mod mqtt;
 mod pump;
@@ -11,6 +12,7 @@ mod aht10;
 
 use clap::Parser;
 use cli::{Cli, Mode};
+use flowmeter::FlowmeterReader;
 use mqtt::{MqttEnv, MqttPublisher};
 use pump::PumpData;
 use reader::{ModbusReader, SensorReader};
@@ -70,6 +72,30 @@ fn main() {
     #[cfg(target_os = "linux")]
     let mut aht10 = Aht10Reader::new(config::I2C_BUS, config::AHT10_ADDR);
 
+    // ── Flow meter (webcam + Groq) — optional, skipped if GROQ_API_KEY absent ──
+    let flowmeter: Option<FlowmeterReader> = match FlowmeterReader::from_env() {
+        Ok(r)  => {
+            log::info!("[flowmeter] enabled  backend={:?}  brand={}  model={}",
+                r.backend, r.brand, "groq-vision");
+            Some(r)
+        }
+        Err(e) => {
+            log::info!("[flowmeter] disabled — {e}");
+            None
+        }
+    };
+
+    // Interval comes from CRON_TIME env var (e.g. "0 */6 * * *" → 6 h).
+    // Falls back to 6 hours if the var is absent or unparseable.
+    let flowmeter_interval: Duration = {
+        let hours = std::env::var("CRON_TIME").ok()
+            .and_then(|s| config::parse_cron_hours(&s))
+            .unwrap_or(6);
+        log::info!("[flowmeter] capture interval: every {hours} hour(s)  (CRON_TIME)");
+        Duration::from_secs(hours * 3600)
+    };
+    let mut last_flowmeter_run: Option<std::time::Instant> = None;
+
     // ── Main poll loop ─────────────────────────────────────────────────────────
     loop {
         // AHT10: ambient temperature & humidity (Linux / I2C)
@@ -96,6 +122,25 @@ fn main() {
             log_pump(&data);
             if let Some(ref m) = mqtt {
                 m.publish_blower_pump(&data);
+            }
+        }
+
+        // Flowmeter: webcam capture → Groq OCR (schedule driven by CRON_TIME)
+        if let Some(ref fm) = flowmeter {
+            let due = last_flowmeter_run
+                .map(|t| t.elapsed() >= flowmeter_interval)
+                .unwrap_or(true); // run immediately on first cycle
+            if due {
+                last_flowmeter_run = Some(std::time::Instant::now());
+                match fm.read() {
+                    Ok(data) => {
+                        log_flowmeter(&data);
+                        if let Some(ref m) = mqtt {
+                            m.publish_flowmeter(&data);
+                        }
+                    }
+                    Err(e) => log::warn!("{e}"),
+                }
             }
         }
 
@@ -150,6 +195,12 @@ fn log_pump(d: &PumpData) {
             );
         }
     }
+}
+
+fn log_flowmeter(d: &flowmeter::FlowReading) {
+    log::info!("[flowmeter] ──────────────────────────────────────");
+    log::info!("[flowmeter]   Brand   : {}", d.brand);
+    log::info!("[flowmeter]   Reading : {} m³  ({})", d.reading_m3, d.reading_str);
 }
 
 fn ok_str(ok: bool) -> &'static str {

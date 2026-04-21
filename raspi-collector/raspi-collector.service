@@ -1,0 +1,24 @@
+[Unit]
+Description=iClinkz Raspi Collector — sensor + flowmeter data to MQTT
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi5
+WorkingDirectory=/home/pi5/iclinkz
+EnvironmentFile=/home/pi5/iclinkz/.env
+ExecStart=/home/pi5/iclinkz/raspi-collector --mode subscriber
+Restart=on-failure
+RestartSec=10
+
+# Give USB/serial devices time to appear after reboot
+ExecStartPre=/bin/sleep 5
+
+# Log to journald (view with: journalctl -u raspi-collector -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=raspi-collector
+
+[Install]
+WantedBy=multi-user.target

@@ -21,6 +21,7 @@ i2cdev     = "0.5"
 rumqttc    = "0.24"
 dotenvy    = "0.15"
 clap       = { version = "4", features = ["derive"] }
+ureq       = { version = "2", features = ["tls"] }
 
 [profile.release]
 opt-level     = "z"

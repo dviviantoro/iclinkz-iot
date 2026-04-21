@@ -1,4 +1,4 @@
-use crate::{pump::PumpData, sensor::SensorData};
+use crate::{flowmeter::FlowReading, pump::PumpData, sensor::SensorData};
 #[cfg(target_os = "linux")]
 use crate::aht10::AmbientData;
 
@@ -161,6 +161,16 @@ impl MqttPublisher {
         self.publish("ambient", serde_json::json!({
             "amb_temp": (d.temperature * 100.0).round() / 100.0,
             "amb_hum":  (d.humidity    * 100.0).round() / 100.0,
+        }));
+    }
+
+    // ── flowmeter — webcam OCR reading via Groq vision ─────────────────────────
+
+    pub fn publish_flowmeter(&self, d: &FlowReading) {
+        self.publish("flowmeter", serde_json::json!({
+            "flow_reading":     d.reading_m3,
+            "flow_reading_str": d.reading_str,
+            "flow_brand":       d.brand,
         }));
     }
 }
