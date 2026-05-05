@@ -49,29 +49,15 @@ fn main() {
         config::READ_INTERVAL_SECS, config::MAX_RETRIES, config::TIMEOUT_MS);
 
     // ── pH calibration — driven by PH_CAL_CSV in .env ─────────────────────────
-    let ph_cal: PhCalibration = match std::env::var("PH_CAL_CSV").ok().filter(|s| !s.trim().is_empty()) {
-        Some(path_str) => {
-            let path = std::path::Path::new(&path_str);
-            match PhCalibration::load_from_csv(path) {
-                Ok(cal) if cal.is_active() => {
-                    log::info!("[cal] pH calibration active  file={path_str}");
-                    cal
-                }
-                Ok(_) => {
-                    log::warn!("[cal] calibration file is empty ({path_str}) — pH values published as-is");
-                    PhCalibration::identity()
-                }
-                Err(e) => {
-                    log::error!("[cal] failed to load {path_str}: {e} — pH values published as-is");
-                    PhCalibration::identity()
-                }
-            }
-        }
-        None => {
-            log::info!("[cal] PH_CAL_CSV not set — pH values published as-is");
-            PhCalibration::identity()
-        }
-    };
+    // The CSV is reloaded automatically whenever its modification time changes,
+    // so calibration updates from iclinkz-calibrator take effect on the next poll
+    // without restarting this process.
+    let ph_cal_path: Option<String> =
+        std::env::var("PH_CAL_CSV").ok().filter(|s| !s.trim().is_empty());
+
+    let mut ph_cal      = load_ph_cal(ph_cal_path.as_deref());
+    let mut ph_cal_mtime: Option<std::time::SystemTime> =
+        ph_cal_path.as_deref().and_then(file_mtime);
 
     // ── MQTT publisher (None in read-only mode) ────────────────────────────────
     let mqtt: Option<MqttPublisher> = match cli.mode {
@@ -125,6 +111,15 @@ fn main() {
 
     // ── Main poll loop ─────────────────────────────────────────────────────────
     loop {
+        // Reload calibration CSV if the file has been modified since last read
+        if let Some(ref path_str) = ph_cal_path {
+            let mtime = file_mtime(path_str);
+            if mtime != ph_cal_mtime {
+                ph_cal       = load_ph_cal(Some(path_str));
+                ph_cal_mtime = mtime;
+            }
+        }
+
         // AHT10: ambient temperature & humidity (Linux / I2C)
         #[cfg(target_os = "linux")]
         {
@@ -237,4 +232,33 @@ fn log_flowmeter(d: &flowmeter::FlowReading) {
 
 fn ok_str(ok: bool) -> &'static str {
     if ok { "OK" } else { "STALE" }
+}
+
+// ── Calibration helpers ────────────────────────────────────────────────────────
+
+fn load_ph_cal(path: Option<&str>) -> PhCalibration {
+    match path {
+        None => {
+            log::info!("[cal] PH_CAL_CSV not set — pH values published as-is");
+            PhCalibration::identity()
+        }
+        Some(p) => match PhCalibration::load_from_csv(std::path::Path::new(p)) {
+            Ok(cal) if cal.is_active() => {
+                log::info!("[cal] pH calibration loaded  file={p}");
+                cal
+            }
+            Ok(_) => {
+                log::warn!("[cal] calibration file is empty ({p}) — pH values published as-is");
+                PhCalibration::identity()
+            }
+            Err(e) => {
+                log::error!("[cal] failed to load {p}: {e} — pH values published as-is");
+                PhCalibration::identity()
+            }
+        },
+    }
+}
+
+fn file_mtime(path: &str) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
 }

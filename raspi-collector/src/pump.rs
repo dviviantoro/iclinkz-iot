@@ -35,9 +35,13 @@ impl PumpData {
 
         let timestamp = obj
             .get("ts")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+            .and_then(|v| v.as_u64())
+            .map(|ms| {
+                let s = ms / 1000;
+                format!("up {}h {:02}m {:02}s", s / 3600, (s % 3600) / 60, s % 60)
+            })
+            .or_else(|| obj.get("ts").and_then(|v| v.as_str()).map(str::to_string))
+            .unwrap_or_else(|| "unknown".to_string());
 
         let mut pumps = HashMap::new();
         for (key, val) in obj {
