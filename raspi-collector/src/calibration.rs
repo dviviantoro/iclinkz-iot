@@ -33,7 +33,7 @@ impl PhCalibration {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let mut cols = line.splitn(2, ',');
+            let mut cols = line.split(',');
             let raw_str    = cols.next().unwrap_or("").trim();
             let actual_str = cols.next().unwrap_or("").trim();
 
