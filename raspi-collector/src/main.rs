@@ -1,3 +1,4 @@
+mod calibration;
 mod cli;
 mod config;
 mod flowmeter;
@@ -10,6 +11,7 @@ mod uart_usb;
 #[cfg(target_os = "linux")]
 mod aht10;
 
+use calibration::PhCalibration;
 use clap::Parser;
 use cli::{Cli, Mode};
 use flowmeter::FlowmeterReader;
@@ -45,6 +47,31 @@ fn main() {
     log::info!("AHT10  -> {}  addr 0x{:02X}", config::I2C_BUS, config::AHT10_ADDR);
     log::info!("poll interval {}s | retries {} | timeout {}ms",
         config::READ_INTERVAL_SECS, config::MAX_RETRIES, config::TIMEOUT_MS);
+
+    // ── pH calibration — driven by PH_CAL_CSV in .env ─────────────────────────
+    let ph_cal: PhCalibration = match std::env::var("PH_CAL_CSV").ok().filter(|s| !s.trim().is_empty()) {
+        Some(path_str) => {
+            let path = std::path::Path::new(&path_str);
+            match PhCalibration::load_from_csv(path) {
+                Ok(cal) if cal.is_active() => {
+                    log::info!("[cal] pH calibration active  file={path_str}");
+                    cal
+                }
+                Ok(_) => {
+                    log::warn!("[cal] calibration file is empty ({path_str}) — pH values published as-is");
+                    PhCalibration::identity()
+                }
+                Err(e) => {
+                    log::error!("[cal] failed to load {path_str}: {e} — pH values published as-is");
+                    PhCalibration::identity()
+                }
+            }
+        }
+        None => {
+            log::info!("[cal] PH_CAL_CSV not set — pH values published as-is");
+            PhCalibration::identity()
+        }
+    };
 
     // ── MQTT publisher (None in read-only mode) ────────────────────────────────
     let mqtt: Option<MqttPublisher> = match cli.mode {
@@ -110,7 +137,12 @@ fn main() {
         }
 
         // RS485: water quality (Modbus RTU)
-        if let Ok(data) = rs485.read() {
+        if let Ok(mut data) = rs485.read() {
+            if data.ph_ok && ph_cal.is_active() {
+                let raw = data.ph;
+                data.ph = ph_cal.apply(raw);
+                log::debug!("[cal] pH  raw={raw:.3}  →  calibrated={:.3}", data.ph);
+            }
             log_sensor(&data);
             if let Some(ref m) = mqtt {
                 m.publish_chamber_effluent(&data);
