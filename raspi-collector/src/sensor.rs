@@ -21,6 +21,7 @@ pub struct SensorData {
     pub tds:              u16,    // ppm
     pub ec_temperature:   f32,    // °C
     pub ph:               f32,
+    pub raw_ph:           Option<f32>,
     pub ph_temperature:   f32,    // °C
     pub do_ok:            bool,
     pub ec_ok:            bool,
@@ -40,6 +41,7 @@ impl SensorData {
             tds:              regs[REG_TDS],
             ec_temperature:   regs[REG_EC_TEMP] as f32 / 100.0,
             ph:               regs[REG_PH]      as f32 / 10.0,
+            raw_ph:           None,
             ph_temperature:   regs[REG_PH_TEMP] as f32 / 10.0,
             do_ok:            status & (1 << 0) != 0,
             ec_ok:            status & (1 << 1) != 0,

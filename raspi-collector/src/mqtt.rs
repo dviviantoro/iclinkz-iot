@@ -123,13 +123,19 @@ impl MqttPublisher {
 
     pub fn publish_chamber_effluent(&self, d: &SensorData) {
         let water_temp = d.avg_temperature().unwrap_or(0.0);
-        self.publish("chamber_effluent", serde_json::json!({
+        let mut payload = serde_json::json!({
             "ph":         d.ph,
             "water_temp": (water_temp * 100.0).round() / 100.0,
             "do":         d.do_concentration,
             "tds":        d.tds,
             "ec":         d.ec,
-        }));
+        });
+
+        if let Some(raw) = d.raw_ph {
+            payload.as_object_mut().unwrap().insert("raw_ph".to_string(), serde_json::json!(raw));
+        }
+
+        self.publish("chamber_effluent", payload);
     }
 
     // ── blower_pump — pump monitor from USB JSON node ──────────────────────────

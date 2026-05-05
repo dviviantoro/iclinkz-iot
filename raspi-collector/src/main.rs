@@ -135,6 +135,7 @@ fn main() {
         if let Ok(mut data) = rs485.read() {
             if data.ph_ok && ph_cal.is_active() {
                 let raw = data.ph;
+                data.raw_ph = Some(raw);
                 data.ph = ph_cal.apply(raw);
                 log::debug!("[cal] pH  raw={raw:.3}  →  calibrated={:.3}", data.ph);
             }
@@ -202,7 +203,12 @@ fn log_sensor(d: &SensorData) {
     log::info!("[{}]         TDS           {:>7} ppm",    d.source, d.tds);
     log::info!("[{}]   [pH]  {}", d.source, ok_str(d.ph_ok));
     log::info!("[{}]         Temperature   {:>7.1} °C",   d.source, d.ph_temperature);
-    log::info!("[{}]         pH            {:>7.1}",       d.source, d.ph);
+    if let Some(raw) = d.raw_ph {
+        log::info!("[{}]         Raw pH        {:>7.1}",      d.source, raw);
+        log::info!("[{}]         Calibrated pH {:>7.1}",      d.source, d.ph);
+    } else {
+        log::info!("[{}]         pH            {:>7.1}",       d.source, d.ph);
+    }
 }
 
 fn log_pump(d: &PumpData) {
